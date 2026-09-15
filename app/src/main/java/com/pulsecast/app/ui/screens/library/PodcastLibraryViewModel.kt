@@ -6,8 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.pulsecast.app.PulseCastApplication
 import com.pulsecast.app.data.local.entity.PodcastEntity
 import com.pulsecast.app.data.local.toEntity
-import com.pulsecast.app.data.parser.ItunesSearchApi
-import com.pulsecast.app.data.parser.ItunesSearchResult
 import com.pulsecast.app.data.parser.OpmlFeed
 import com.pulsecast.app.data.parser.RssParser
 import kotlinx.coroutines.Dispatchers
@@ -27,13 +25,6 @@ sealed interface ImportState {
     data class Error(val message: String) : ImportState
 }
 
-sealed interface SearchState {
-    data object Idle : SearchState
-    data object Loading : SearchState
-    data class Results(val results: List<ItunesSearchResult>) : SearchState
-    data class Error(val message: String) : SearchState
-}
-
 data class OpmlImportProgress(
     val isActive: Boolean = false,
     val total: Int = 0,
@@ -42,27 +33,25 @@ data class OpmlImportProgress(
     val errors: List<String> = emptyList()
 )
 
+/**
+ * Bibliothèque : liste les podcasts abonnés et gère les deux modes d'ajout —
+ * URL de flux RSS saisie à la main, ou import global d'un fichier OPML
+ * (export Podcast Addict, AntennaPod, Pocket Casts…).
+ *
+ * La découverte du catalogue et la recherche vivent dans `DiscoverViewModel`
+ * (onglet Accueil).
+ */
 class PodcastLibraryViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = (application as PulseCastApplication).database
     private val podcastDao = database.podcastDao()
     private val episodeDao = database.episodeDao()
-    private val searchApi = ItunesSearchApi()
 
     val podcasts: StateFlow<List<PodcastEntity>> = podcastDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _importState = MutableStateFlow<ImportState>(ImportState.Idle)
     val importState: StateFlow<ImportState> = _importState.asStateFlow()
-
-    private val _searchState = MutableStateFlow<SearchState>(SearchState.Idle)
-    val searchState: StateFlow<SearchState> = _searchState.asStateFlow()
-
-    private val _subscribingIds = MutableStateFlow<Set<Long>>(emptySet())
-    val subscribingIds: StateFlow<Set<Long>> = _subscribingIds.asStateFlow()
-
-    private val _subscribeErrors = MutableStateFlow<Map<Long, String>>(emptyMap())
-    val subscribeErrors: StateFlow<Map<Long, String>> = _subscribeErrors.asStateFlow()
 
     private val _opmlProgress = MutableStateFlow(OpmlImportProgress())
     val opmlProgress: StateFlow<OpmlImportProgress> = _opmlProgress.asStateFlow()
@@ -112,68 +101,16 @@ class PodcastLibraryViewModel(application: Application) : AndroidViewModel(appli
         _importState.value = ImportState.Idle
     }
 
-    fun searchPodcasts(query: String) {
-        if (query.isBlank()) {
-            _searchState.value = SearchState.Idle
-            return
-        }
-        viewModelScope.launch {
-            _searchState.value = SearchState.Loading
-            try {
-                val results = searchApi.search(query)
-                _searchState.value = SearchState.Results(results)
-            } catch (e: Exception) {
-                _searchState.value = SearchState.Error(
-                    "Recherche impossible : ${e.message ?: "erreur inconnue"}"
-                )
-            }
-        }
-    }
-
-    fun clearSearch() {
-        _searchState.value = SearchState.Idle
-    }
-
-    fun subscribeFromSearch(result: ItunesSearchResult) {
-        val trackId = result.trackId
-        val feedUrl = result.feedUrl ?: return
-        viewModelScope.launch {
-            _subscribingIds.value = _subscribingIds.value + trackId
-            try {
-                val existing = withContext(Dispatchers.IO) {
-                    podcastDao.findByFeedUrl(feedUrl)
-                }
-                if (existing != null) return@launch
-
-                val parsedFeed = withContext(Dispatchers.IO) {
-                    openFeedStream(feedUrl).use { input -> RssParser().parse(input) }
-                }
-                withContext(Dispatchers.IO) {
-                    val podcastId = podcastDao.insert(
-                        PodcastEntity(
-                            feedUrl = feedUrl,
-                            title = parsedFeed.title.ifBlank { result.trackName },
-                            imageUrl = parsedFeed.imageUrl ?: result.artworkUrl100,
-                            description = parsedFeed.description
-                        )
-                    )
-                    if (podcastId > 0) {
-                        episodeDao.insertAll(parsedFeed.episodes.map { it.toEntity(podcastId) })
-                    }
-                }
-            } catch (e: Exception) {
-                _subscribeErrors.value = _subscribeErrors.value + (trackId to
-                    "Échec de l'abonnement : ${e.message ?: "erreur inconnue"}")
-            } finally {
-                _subscribingIds.value = _subscribingIds.value - trackId
-            }
-        }
-    }
-
+    /**
+     * Importe une liste de flux issus d'un fichier OPML. Les flux déjà
+     * abonnés sont ignorés silencieusement ; les échecs unitaires sont
+     * collectés sans interrompre le reste de l'import.
+     */
     fun importOpmlFeeds(feeds: List<OpmlFeed>) {
         if (feeds.isEmpty()) {
             _opmlProgress.value = OpmlImportProgress(
-                isActive = false, errors = listOf("Aucun flux trouvé dans ce fichier OPML.")
+                isActive = false,
+                errors = listOf("Aucun flux trouvé dans ce fichier OPML.")
             )
             return
         }
@@ -182,7 +119,8 @@ class PodcastLibraryViewModel(application: Application) : AndroidViewModel(appli
             val errors = mutableListOf<String>()
             for ((index, feed) in feeds.withIndex()) {
                 _opmlProgress.value = _opmlProgress.value.copy(
-                    completed = index, currentTitle = feed.title
+                    completed = index,
+                    currentTitle = feed.title
                 )
                 try {
                     val existing = withContext(Dispatchers.IO) {
@@ -192,7 +130,9 @@ class PodcastLibraryViewModel(application: Application) : AndroidViewModel(appli
                         withContext(Dispatchers.IO) {
                             openFeedStream(feed.feedUrl).use { input ->
                                 val parsed = RssParser().parse(input)
-                                val title = parsed.title.ifBlank { feed.title.ifBlank { "Podcast" } }
+                                val title = parsed.title.ifBlank {
+                                    feed.title.ifBlank { "Podcast" }
+                                }
                                 val podcastId = podcastDao.insert(
                                     PodcastEntity(
                                         feedUrl = feed.feedUrl,
