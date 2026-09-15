@@ -2,13 +2,11 @@ package com.pulsecast.app.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -20,7 +18,6 @@ import androidx.compose.material3.BottomSheetScaffold
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -31,10 +28,6 @@ import androidx.compose.material3.rememberBottomSheetScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -51,7 +44,6 @@ import com.pulsecast.app.theme.AppTheme
 import com.pulsecast.app.theme.PulseCastTheme
 import com.pulsecast.app.theme.ThemeViewModel
 import com.pulsecast.app.ui.components.MiniPlayer
-import com.pulsecast.app.ui.components.ThemeSelector
 import com.pulsecast.app.ui.screens.episodes.EpisodeListScreen
 import com.pulsecast.app.ui.screens.home.HomeScreen
 import com.pulsecast.app.ui.screens.library.PodcastLibraryScreen
@@ -61,8 +53,11 @@ import kotlinx.coroutines.launch
 /**
  * Composable racine : applique le thème (avec l'accent dynamique éventuel),
  * peint le fond du thème sur toute la fenêtre, héberge le bottom sheet
- * mini-lecteur/grand lecteur, la barre de navigation Accueil/Bibliothèque et
- * le sélecteur de style visuel.
+ * mini-lecteur/grand lecteur et la barre de navigation Accueil/Bibliothèque.
+ *
+ * Le sélecteur de style visuel vit dans l'écran Accueil (section repliable),
+ * pas dans une feuille modale : le rendu dans la composition normale est
+ * fiable et le choix s'applique immédiatement à toute la hiérarchie.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -90,7 +85,6 @@ fun PulseCastApp() {
             val navController = rememberNavController()
             val scaffoldState = rememberBottomSheetScaffoldState()
             val scope = rememberCoroutineScope()
-            var showThemePicker by remember { mutableStateOf(false) }
 
             val navBarBottomInset = WindowInsets.navigationBars.asPaddingValues()
             val miniPlayerBarHeight = 68.dp
@@ -146,7 +140,6 @@ fun PulseCastApp() {
                             onPlayEpisode = { episode, podcastTitle, artworkUri ->
                                 playbackViewModel.playEpisode(episode, podcastTitle, artworkUri)
                             },
-                            onOpenThemePicker = { showThemePicker = true },
                             modifier = Modifier.weight(1f).fillMaxWidth()
                         )
                         if (showBottomBar) {
@@ -178,33 +171,6 @@ fun PulseCastApp() {
                     }
                 }
             )
-
-            if (showThemePicker) {
-                ModalBottomSheet(onDismissRequest = { showThemePicker = false }) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
-                            .padding(bottom = 32.dp)
-                    ) {
-                        Text(
-                            text = "Style visuel",
-                            style = MaterialTheme.typography.titleLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            text = "4 identités, appliquées instantanément à toute l'application.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        ThemeSelector(
-                            selectedTheme = selectedTheme,
-                            onThemeSelected = themeViewModel::selectTheme
-                        )
-                    }
-                }
-            }
         }
     }
 }
@@ -250,15 +216,13 @@ private fun pulseCastNavItemColors() = NavigationBarItemDefaults.colors(
 private fun PulseCastNavHost(
     navController: NavHostController,
     onPlayEpisode: (EpisodeEntity, String?, String?) -> Unit,
-    onOpenThemePicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     NavHost(navController = navController, startDestination = "home", modifier = modifier) {
         composable("home") {
             HomeScreen(
                 onOpenEpisodes = { podcastId -> navController.navigate("episodes/$podcastId") },
-                onOpenLibrary = { navController.navigate("library") { launchSingleTop = true } },
-                onOpenThemePicker = onOpenThemePicker
+                onOpenLibrary = { navController.navigate("library") { launchSingleTop = true } }
             )
         }
         composable("library") {

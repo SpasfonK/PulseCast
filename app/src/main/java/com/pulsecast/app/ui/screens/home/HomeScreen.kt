@@ -52,8 +52,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.pulsecast.app.data.catalog.CatalogPodcast
+import com.pulsecast.app.theme.AppTheme
+import com.pulsecast.app.theme.ThemeViewModel
 import com.pulsecast.app.ui.components.PodcastArtworkCard
 import com.pulsecast.app.ui.components.PulseCastSurface
+import com.pulsecast.app.ui.components.ThemeSelector
 
 /**
  * Page d'accueil : découverte du catalogue (classement "À la une", rangées
@@ -68,10 +71,10 @@ import com.pulsecast.app.ui.components.PulseCastSurface
 fun HomeScreen(
     onOpenEpisodes: (Long) -> Unit,
     onOpenLibrary: () -> Unit,
-    onOpenThemePicker: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val viewModel: DiscoverViewModel = viewModel()
+    val themeViewModel: ThemeViewModel = viewModel()
 
     val featured by viewModel.featured.collectAsState()
     val sections by viewModel.sections.collectAsState()
@@ -80,6 +83,7 @@ fun HomeScreen(
     val subscribingIds by viewModel.subscribingIds.collectAsState()
     val subscribeMessage by viewModel.subscribeMessage.collectAsState()
     val searchState by viewModel.searchState.collectAsState()
+    val selectedTheme by themeViewModel.selectedTheme.collectAsState()
 
     val subscribedFeedUrls = remember(subscriptionItems) {
         subscriptionItems.map { it.podcast.feedUrl }.toSet()
@@ -87,12 +91,22 @@ fun HomeScreen(
 
     var query by rememberSaveable { mutableStateOf("") }
     var isSearching by rememberSaveable { mutableStateOf(false) }
+    var showStylePicker by rememberSaveable { mutableStateOf(false) }
     var selectedPodcast by remember { mutableStateOf<CatalogPodcast?>(null) }
 
     LaunchedEffect(Unit) { viewModel.loadIfNeeded() }
 
     Column(modifier = modifier.fillMaxSize()) {
-        HomeHeader(onOpenThemePicker = onOpenThemePicker)
+        HomeHeader(
+            onToggleStylePicker = { showStylePicker = !showStylePicker }
+        )
+
+        if (showStylePicker) {
+            StylePickerSection(
+                selectedTheme = selectedTheme,
+                onThemeSelected = themeViewModel::selectTheme
+            )
+        }
 
         if (isSearching) {
             Row(
@@ -172,7 +186,7 @@ private fun isSubscribed(
 }
 
 @Composable
-private fun HomeHeader(onOpenThemePicker: () -> Unit) {
+private fun HomeHeader(onToggleStylePicker: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -191,11 +205,53 @@ private fun HomeHeader(onOpenThemePicker: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        IconButton(onClick = onOpenThemePicker) {
+        IconButton(onClick = onToggleStylePicker) {
             Icon(
                 imageVector = Icons.Filled.Palette,
                 contentDescription = "Changer de style visuel",
                 tint = MaterialTheme.colorScheme.primary
+            )
+        }
+    }
+}
+
+/**
+ * Sélecteur de style intégré directement dans la page (et non dans une
+ * feuille modale) : le choix s'affiche et s'applique dans la composition
+ * normale, sans dépendre d'une fenêtre popup.
+ */
+@Composable
+private fun StylePickerSection(
+    selectedTheme: AppTheme,
+    onThemeSelected: (AppTheme) -> Unit
+) {
+    PulseCastSurface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+    ) {
+        Column(modifier = Modifier.padding(vertical = 12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Style visuel",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "Appliqué instantanément à toute l'application.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            ThemeSelector(
+                selectedTheme = selectedTheme,
+                onThemeSelected = onThemeSelected
             )
         }
     }

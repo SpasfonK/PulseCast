@@ -89,7 +89,20 @@ class RssParser {
                     "enclosure" -> if (insideItem) {
                         val url = parser.getAttributeValue(null, "url")
                         val type = parser.getAttributeValue(null, "type")
-                        if (!url.isNullOrBlank() && (type == null || type.startsWith("audio"))) {
+                        if (!url.isNullOrBlank() && isPlayableMediaType(type)) {
+                            itemAudioUrl = url
+                        }
+                    }
+
+                    // Media RSS / Podcasting 2.0 : certains flux référencent
+                    // le fichier dans <media:content> au lieu d'un
+                    // <enclosure>. `medium` évite de confondre une vignette
+                    // image avec le média à lire.
+                    "content" -> if (insideItem && itemAudioUrl == null) {
+                        val url = parser.getAttributeValue(null, "url")
+                        val medium = parser.getAttributeValue(null, "medium")
+                        val type = parser.getAttributeValue(null, "type") ?: medium
+                        if (!url.isNullOrBlank() && isPlayableMediaType(type)) {
                             itemAudioUrl = url
                         }
                     }
@@ -174,6 +187,17 @@ class RssParser {
     } catch (e: Exception) {
         null
     }
+
+    /**
+     * Accepte l'audio comme la vidéo : un fichier vidéo lu sans surface
+     * (lecture en arrière-plan) ne restitue que sa piste audio, ce qui reste
+     * préférable à un épisode invisible. Les vignettes (image/*) et documents
+     * (application/*) sont bien écartés.
+     */
+    private fun isPlayableMediaType(type: String?): Boolean =
+        type == null ||
+            type.startsWith("audio", ignoreCase = true) ||
+            type.startsWith("video", ignoreCase = true)
 
     private fun rawTagIs(rawName: String?, expected: String): Boolean =
         rawName?.equals(expected, ignoreCase = true) == true
