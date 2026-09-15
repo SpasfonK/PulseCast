@@ -1,0 +1,15 @@
+*.iml
+.gradle/
+/local.properties
+.idea/
+.DS_Store
+build/
+app/build/
+app/schemas/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Wrapper binaire régénéré en CI (voir PHASE1_NOTES.md) : on ignore le jar
+# s'il est régénéré localement pour éviter les divergences de version.
+!gradle/wrapper/gradle-wrapper.properties

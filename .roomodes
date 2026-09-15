@@ -1,0 +1,25 @@
+{
+  "customModes": [
+    {
+      "slug": "web-spa",
+      "name": "Web SPA & HTML",
+      "roleDefinition": "Expert frontend Vanilla JS/HTML5/CSS3, édition par diffs stricts.",
+      "groups": ["read", "edit", "command"],
+      "model": "deepseek/deepseek-v4-pro"
+    },
+    {
+      "slug": "android-audio",
+      "name": "Android & Audio (Kotlin)",
+      "roleDefinition": "Architecte Android (Kotlin, Jetpack, AudioRecord, MediaCodec, Gradle).",
+      "groups": ["read", "edit", "command"],
+      "model": "qwen/qwen3-coder-480b"
+    },
+    {
+      "slug": "secours-architect",
+      "name": "Escalade Secours (Sonnet 5)",
+      "roleDefinition": "Architecte Logiciel Principal pour blocages persistants et audits.",
+      "groups": ["read", "edit", "command"],
+      "model": "anthropic/claude-sonnet-5"
+    }
+  ]
+}

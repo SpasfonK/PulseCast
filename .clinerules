@@ -1,0 +1,24 @@
+# DIRECTIVES D'ÉCONOMIE STRICTE DE RESSOURCES
+
+### 1. ÉDITION PAR DIFF STRICT
+- N'utilise QUE des remplacements ciblés (search_and_replace / apply_diff).
+- Ne réécris jamais un fichier complet s'il dépasse 30 lignes.
+- Résume en 2 phrases l'intervention au lieu de réafficher le code complet dans le tchat.
+
+### 2. SÉLECTION ET LECTURE DE FICHIERS
+- Ne charge en contexte que les blocs strictement nécessaires.
+- Pour tout fichier CSV/Excel/GeoJSON de plus de 300 lignes, ne jamais le lire en entier :
+  proposer d'abord un script Python d'échantillonnage local.
+
+### 3. RÈGLE DES 2 ÉCHECS
+- Si une correction échoue 2 fois sur la même erreur, arrête-toi et écris :
+  « BLOCAGE D'ARCHITECTURE DÉTECTÉ : basculez en mode Plan (Claude Sonnet 5). »
+
+### 4. MÉMOIRE (STATUS.MD)
+- Mets à jour STATUS.md à la fin de chaque étape validée.
+- Vers 15-18 échanges dans la même conversation, conclus par :
+  « Jalon consigné dans STATUS.md. Ouvrez une nouvelle tâche (+). »
+
+### 5. CONFIDENTIALITÉ
+- Ne transmets jamais de données nominatives (collègues, administrés) ou de montants
+  de marché en négociation, même partiellement anonymisés.
