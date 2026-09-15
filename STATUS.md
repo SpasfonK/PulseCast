@@ -1,4 +1,4 @@
-# STATUS.md — PulseCast (état au 15/09/2026, fin de session Kilo)
+# STATUS.md — PulseCast (état au 15/09/2026, session Kilo #2)
 
 > Document de passation : à lire en priorité si vous reprenez le projet dans
 > une nouvelle session. Tout ce qui suit a été vérifié factuellement.
@@ -56,12 +56,34 @@
 - 4 thèmes visuels (OLED, Verre Dépoli, Néo-Brutaliste, Synthwave) appliqués
   en direct via `PulseCastTheme` + jetons `PulseCastThemeExtras`.
 
-## 4. 🔴 BUG OUVERT #1 — « Liste des épisodes vide » (PRIORITÉ MAX)
+## 4. ✅ BUG RÉSOLU #1 — « Liste des épisodes vide » (et sélecteur de style invisible)
 
-Symptôme utilisateur : après import OPML, cliquer un abonnement → liste
-d'épisodes **vide/noire**. Persiste après les correctifs des builds 5 et 6.
+**Cause racine unique, trouvée et corrigée : `PulseCastSurface` s'effondrait à
+0 px de haut.**
 
-### Déjà tenté (sans confirmation de résolution)
+`ui/components/PulseCastSurface.kt` plaçait *tous* ses enfants en
+`Modifier.matchParentSize()` — l'ombre dure, le halo néon **et le contenu**.
+Or un enfant `matchParentSize` ne participe pas au calcul de la taille de son
+`Box` (source `BoxMeasurePolicy` : « does not take part in defining the size of
+the Box »). Le `Box` parent n'ayant alors plus aucun enfant qui définisse sa
+taille, il retombait sur `constraints.minHeight` = **0**. Toute surface était
+donc rendue à une hauteur nulle.
+
+Conséquences observées sur l'APK précédent :
+- chaque ligne d'épisode (`EpisodeRow`) → hauteur 0 → **liste d'épisodes vide
+  bien que les compteurs d'en-tête (non-lus/lus, hors surface) soient corrects** ;
+- `StylePickerSection` (sélecteur de styles, enveloppé dans une surface) →
+  **aucun style visible / « aucun choix »** ;
+- idem lignes de bibliothèque, carte « Aucun abonnement », barre de recherche,
+  carte de progression OPML.
+
+Correctif (build #9) : seules les décorations restent en `matchParentSize` ;
+le contenu est mesuré normalement (`.fillMaxWidth()`) et donne sa hauteur au
+`Box`. Aucune API publique changée, aucun appelant modifié.
+
+### Historique des tentatives (contexte, désormais obsolète)
+Symptôme initial : après import OPML, cliquer un abonnement → liste vide.
+Les correctifs ci-dessous étaient utiles mais **n'étaient pas la cause** :
 1. Import OPML réparateur : `FeedRepository.fetchAndStoreFeed` est idempotent —
    si le podcast existe sans épisodes, le flux est re-téléchargé et les
    épisodes insérés (`importOpmlFeeds` ne saute que les flux déjà complets).
@@ -71,50 +93,46 @@ d'épisodes **vide/noire**. Persiste après les correctifs des builds 5 et 6.
    Podcast Addict très probable dans l'OPML de l'utilisateur) et
    `<media:content>` en repli de `<enclosure>`.
 
-### État des investigations (faits vérifiés)
-- DAO/VM/écran revus ligne à ligne : les requêtes Room sont correctes
-  (`observeUnplayedForPodcast` : `is_played = 0` + filtre titre null-safe).
-- Le parseur **n'échoue jamais bruyamment** : `RssParser.parse()` avale le XML
-  malformé (catch → END_DOCUMENT) et peut renvoyer 0 épisodes **sans
-  exception**. Un flux injoignable/malformé devient silencieusement un
-  podcast sans épisodes.
+### Améliorations de robustesse livrées dans le même build
+- `RssParser` supporte maintenant **Atom** (`<feed>`/`<entry>`/`<link
+  rel="enclosure">`, dates `published`/`updated` + variantes avec
+  millisecondes) en plus de RSS 2.0 : un abonnement Atom ne reste plus
+  silencieusement vide.
+- `RssParser.parse()` renvoie un titre **vide** (et non « Podcast sans
+  titre ») quand le flux n'en expose pas : le repli est décidé dans
+  `FeedRepository` (titre OPML puis libellé générique). Un refresh sur un flux
+  momentanément tronqué ne peut donc plus renommer un abonnement existant en
+  « Podcast sans titre » (`FeedRepository` conserve le titre existant).
+
+### Pistes ouvertes restantes (diagnostic, plus aucun bug bloquant connu)
 - Flux français réels testés (Audiomeans, Acast) : RSS 2.0, `<enclosure
-  type="audio/mpeg">` → compatibles parseur. Donc le bug n'est PAS
-  systématique sur les flux standards.
-- Pistes restantes (à creuser en priorité) :
-  a. **Demander à l'utilisateur ce qu'affiche le bouton « Actualiser le
-     flux »** sur l'écran d'un podcast vide (message ajouté en build 6 :
-     « N nouveaux épisodes importés » / « Aucun épisode trouvé dans ce
-     flux » / « Impossible d'actualiser : … »). C'est LE discriminant :
-     réseau ? parse ? rien ne se passe (→ utilisateur encore sur un vieil APK) ?
-  b. Vérifier que l'utilisateur a bien installé le **dernier artefact**
-     (les numéros de run artefact vs. sa version installée).
-  c. Si « Aucun épisode trouvé » : récupérer 2-3 `feed_url` de SON OPML
-     (faire un export exemple) et analyser le XML réel (curl) : Atom ?
-     enclosures exotiques ? Un support `<entry>` Atom est à envisager.
-  d. Logcat via `adb logcat` si l'utilisateur peut brancher le téléphone.
-  e. Vérifier en base (Device Explorer / adb) : `SELECT podcast_id,
-     COUNT(*) FROM episodes GROUP BY podcast_id`.
+  type="audio/mpeg">` → compatibles parseur.
+- Si un abonnement restait vide après le build #9, faire parler le bouton
+  « Actualiser le flux » (`EpisodeListViewModel.refreshMessage`) et vérifier en
+  base : `SELECT podcast_id, COUNT(*) FROM episodes GROUP BY podcast_id`.
+- Vérifier que l'APK installé est bien le **dernier artefact** CI (numéro de
+  run = numéro de build).
 
 ### Détails d'implémentation utiles
 - `data/FeedRepository.kt` = point d'entrée unique d'import (URL, OPML,
   découverte). Y centraliser tout nouveau correctif.
 - Le message de refresh est exposé par `EpisodeListViewModel.refreshMessage`.
 
-## 5. 🟡 BUG OUVERT #2 — Sélecteur de style visuel (corrigé ce round, à retester)
+## 5. ✅ BUG RÉSOLU #2 — Sélecteur de style visuel
 
-- Symptôme : cliquer l'icône palette n'offrait « aucun choix » — la
-  `ModalBottomSheet` ne s'affichait pas de façon fiable (probable conflit
-  avec le `BottomSheetScaffold` racine qui gère déjà le mini-lecteur).
-- Correctif appliqué (build 7) : **suppression de la modale** ; le sélecteur
-  `ThemeSelector` est désormais une **section intégrée à l'écran Accueil**,
-  ouverte/fermée par l'icône palette (`showStylePicker`). Le choix passe par
-  `ThemeViewModel.selectTheme` → DataStore → `PulseCastTheme` recompose tout
-  l'arbre (aucune fenêtre popup impliquée).
+- Symptôme : cliquer l'icône palette n'offrait « aucun choix ».
+- **Cause racine = §4** : la `ModalBottomSheet` initiale (build ≤6) était un
+  faux coupable ; la section intégrée à l'accueil (build 7) était correcte mais
+  restait **invisible** car enveloppée dans `PulseCastSurface` (hauteur 0).
+- Correction de la section précédente (build 9) : le sélecteur s'affiche.
+- Chaîne de sélection inchangée et saine : `ThemeViewModel.selectTheme` →
+  `ThemePreferencesRepository` (DataStore) → `ThemeViewModel.selectedTheme`
+  (racine) → `PulseCastTheme` recompose tout l'arbre ; aucun redémarrage
+  d'Activity.
 - Deux instances de `ThemeViewModel` coexistent (racine + destination Nav
   « home ») : **c'est voulu et sûr**, les deux sont adossées au même
   DataStore singleton (`preferencesDataStore`) qui diffuse les changements.
-- À faire retester : ouvrir l'accueil → icône palette → choisir Synthwave /
+- À retester : ouvrir l'accueil → icône palette → choisir Synthwave /
   Néo-Brutaliste → toute l'UI doit changer instantanément.
 
 ## 6. Carte des fichiers (ce qui compte)
@@ -169,18 +187,18 @@ app/src/main/java/com/pulsecast/app/
 
 ## 8. Prochaines étapes priorisées
 
-1. **Diagnostic épisodes** (voir §4) — question à l'utilisateur + analyse de
-   son OPML réel. C'est le seul vrai bug bloquant restant.
-2. Faire retester le sélecteur de style (§5).
-3. Tests de lecture : jouer un épisode (Phase 2 jamais re-testée), position,
+1. **Retester l'app sur le build #9** : liste d'épisodes d'un abonnement (elle
+   doit afficher les lignes) et sélecteur de style (accueil → icône palette →
+   les 4 styles doivent être visibles et s'appliquer au tap).
+2. Tests de lecture : jouer un épisode (Phase 2 jamais re-testée), position,
    vitesse, mini-lecteur.
-4. Import OPML : export OPML inverse (bouton « Exporter ») ; import de
+3. Import OPML : export OPML inverse (bouton « Exporter ») ; import de
    dossiers/catégories.
-5. Rafraîchissement automatique périodique des abonnements (WorkManager) —
+4. Rafraîchissement automatique périodique des abonnements (WorkManager) —
    actuellement uniquement manuel/à l'ouverture.
-6. Marquer-écouté automatique à 95 % (la règle SQL existe dans
+5. Marquer-écouté automatique à 95 % (la règle SQL existe dans
    `updatePlaybackPosition`), écran « En cours d'écoute » sur l'accueil.
-7. Export de schéma Room : créer `app/schemas/` en CI si migration future
+6. Export de schéma Room : créer `app/schemas/` en CI si migration future
    (version 1 → 2), avec `Migration` explicite obligatoire.
 
 ## 9. Commandes utiles

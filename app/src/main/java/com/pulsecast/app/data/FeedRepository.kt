@@ -43,7 +43,8 @@ class FeedRepository(
         fallbackImageUrl: String? = null
     ): FeedImportResult = withContext(Dispatchers.IO) {
         val parsedFeed = openFeedStream(feedUrl).use { input -> RssParser().parse(input) }
-        val resolvedTitle = parsedFeed.title.ifBlank {
+        val parsedTitle = parsedFeed.title.trim()
+        val resolvedTitle = parsedTitle.ifBlank {
             fallbackTitle?.takeIf { it.isNotBlank() } ?: "Podcast sans titre"
         }
 
@@ -51,7 +52,9 @@ class FeedRepository(
         var podcastId = if (existing != null) {
             podcastDao.update(
                 existing.copy(
-                    title = resolvedTitle,
+                    // Un flux momentanément illisible (XML tronqué) ne doit pas
+                    // renommer un abonnement existant en "Podcast sans titre".
+                    title = parsedTitle.ifBlank { existing.title },
                     imageUrl = parsedFeed.imageUrl ?: existing.imageUrl,
                     description = parsedFeed.description ?: existing.description
                 )

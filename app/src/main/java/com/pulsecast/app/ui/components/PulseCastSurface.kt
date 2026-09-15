@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -32,6 +33,13 @@ import com.pulsecast.app.theme.PulseCastTheme
  * néon reste visible mais sans flou logiciel de repli pour l'instant — pas
  * bloquant, juste un peu moins doux visuellement sur les appareils plus
  * anciens.
+ *
+ * Règle de mesure importante : seules les décorations (ombre dure, halo néon)
+ * utilisent `matchParentSize()`, car un enfant en `matchParentSize` ne
+ * participe **pas** au calcul de la taille du `Box`. Le contenu, lui, est
+ * mesuré normalement (et étiré en largeur) : c'est ce qui lui donne sa
+ * hauteur. Sans cela la surface se réduit à 0 px et son contenu — liste
+ * d'épisodes, sélecteur de style, lignes de la bibliothèque — disparaît.
  */
 @Composable
 fun PulseCastSurface(
@@ -70,9 +78,13 @@ fun PulseCastSurface(
             )
         }
 
+        // Le contenu participe à la mesure : c'est lui qui donne sa taille au
+        // Box. Un `matchParentSize()` ici (et non sur les décorations) ferait
+        // s'effondrer toute la surface à 0 px, car un enfant
+        // `matchParentSize` ne définit jamais la taille de son parent.
         Box(
             modifier = Modifier
-                .matchParentSize()
+                .fillMaxWidth()
                 .clip(shape)
                 .background(colorScheme.surface)
                 .border(extras.borderWidth, colorScheme.outline, shape),

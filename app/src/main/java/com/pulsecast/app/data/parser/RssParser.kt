@@ -36,6 +36,9 @@ data class ParsedFeed(
  *   une exception qui ferait échouer tout l'import du flux.
  * - Un item sans URL audio exploitable (pas d'<enclosure> valide) est exclu
  *   du résultat : il ne peut de toute façon pas être lu.
+ * - Les flux RSS 2.0 (`<channel>` / `<item>` / `<enclosure>`) **et** Atom
+ *   (`<feed>` / `<entry>` / `<link rel="enclosure">`) sont supportés : un
+ *   abonnement Atom ne reste plus silencieusement vide.
  * - Si le flux est tronqué ou mal formé en cours de lecture, le parsing
  *   s'arrête proprement et renvoie les épisodes déjà collectés plutôt que
  *   de tout perdre.
@@ -66,9 +69,11 @@ class RssParser {
         while (eventType != XmlPullParser.END_DOCUMENT) {
             if (eventType == XmlPullParser.START_TAG) {
                 when (localName(parser.name)) {
-                    "channel" -> insideChannel = true
+                    // RSS 2.0 (<channel>) comme Atom (<feed>) : la racine qui
+                    // porte les métadonnées du podcast.
+                    "channel", "feed" -> insideChannel = true
 
-                    "item" -> {
+                    "item", "entry" -> {
                         insideItem = true
                         itemTitle = null
                         itemAudioUrl = null
@@ -91,6 +96,22 @@ class RssParser {
                         val type = parser.getAttributeValue(null, "type")
                         if (!url.isNullOrBlank() && isPlayableMediaType(type)) {
                             itemAudioUrl = url
+                        }
+                    }
+
+                    // Atom (RFC 4287) : le média se trouve dans un
+                    // <link rel="enclosure" href="...">, pas dans un
+                    // <enclosure>. Les <link> de canal/article (texte, sans
+                    // attribut href) sont ignorés.
+                    "link" -> if (insideItem && itemAudioUrl == null) {
+                        val rel = parser.getAttributeValue(null, "rel")
+                        val href = parser.getAttributeValue(null, "href")
+                        val type = parser.getAttributeValue(null, "type")
+                        if (rel.equals("enclosure", ignoreCase = true) &&
+                            !href.isNullOrBlank() &&
+                            isPlayableMediaType(type)
+                        ) {
+                            itemAudioUrl = href
                         }
                     }
 
@@ -128,11 +149,12 @@ class RssParser {
                         itemDurationMs = parseDurationToMillis(safeNextText(parser))
                     }
 
-                    "pubdate" -> if (insideItem) {
+                    // RSS : pubDate ; Atom : published / updated.
+                    "pubdate", "published", "updated" -> if (insideItem && itemPubDate == 0L) {
                         itemPubDate = parseRfc822Date(safeNextText(parser))
                     }
 
-                    "description", "summary" -> {
+                    "description", "summary", "subtitle" -> {
                         val text = safeNextText(parser)
                         if (insideItem) {
                             if (itemDescription == null) itemDescription = text
@@ -148,7 +170,7 @@ class RssParser {
                 }
             } else if (eventType == XmlPullParser.END_TAG) {
                 when (localName(parser.name)) {
-                    "item" -> {
+                    "item", "entry" -> {
                         insideItem = false
                         val audioUrl = itemAudioUrl
                         val title = itemTitle
@@ -163,7 +185,7 @@ class RssParser {
                         }
                     }
 
-                    "channel" -> insideChannel = false
+                    "channel", "feed" -> insideChannel = false
                 }
             }
 
@@ -175,7 +197,11 @@ class RssParser {
         }
 
         return ParsedFeed(
-            title = channelTitle.ifBlank { "Podcast sans titre" },
+            // Volontairement vide si le flux n'expose pas de titre : c'est
+            // `FeedRepository` qui décide du repli (titre OPML, puis libellé
+            // générique). Renvoyer directement "Podcast sans titre" ici
+            // écraserait un titre valide lors d'un refresh partiel.
+            title = channelTitle,
             imageUrl = channelImage,
             description = channelDescription,
             episodes = episodes
@@ -243,7 +269,9 @@ class RssParser {
             "EEE, dd MMM yyyy HH:mm:ss zzz",
             "dd MMM yyyy HH:mm:ss Z",
             "yyyy-MM-dd'T'HH:mm:ssZ",
-            "yyyy-MM-dd'T'HH:mm:ss'Z'"
+            "yyyy-MM-dd'T'HH:mm:ss.SSSZ",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
         ).map { pattern ->
             SimpleDateFormat(pattern, Locale.US).apply {
                 isLenient = true
