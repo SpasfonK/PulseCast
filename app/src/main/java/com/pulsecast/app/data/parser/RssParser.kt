@@ -217,8 +217,15 @@ class RssParser {
     /**
      * Accepte l'audio comme la vidéo : un fichier vidéo lu sans surface
      * (lecture en arrière-plan) ne restitue que sa piste audio, ce qui reste
-     * préférable à un épisode invisible. Les vignettes (image/*) et documents
-     * (application/*) sont bien écartés.
+     * préférable à un épisode invisible. Les vignettes (type MIME
+     * `image/…`) et documents (type MIME `application/…`) sont bien écartés.
+     *
+     * Attention en modifiant ce commentaire : ne jamais faire suivre un
+     * caractère slash d'un astérisque sans espace entre les deux (notation
+     * wildcard de type MIME comprise). Cette paire de caractères ouvre un
+     * commentaire de bloc imbriqué en Kotlin (grammaire `DelimitedComment`
+     * récursive) ; s'il n'est pas refermé, la compilation avale tout le
+     * reste du fichier et échoue.
      */
     private fun isPlayableMediaType(type: String?): Boolean =
         type == null ||
