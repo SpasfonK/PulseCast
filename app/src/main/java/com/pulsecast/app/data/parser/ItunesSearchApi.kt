@@ -47,6 +47,6 @@ class ItunesSearchApi {
                 )
             }
         }
-        results
+        return results
     }
 }
