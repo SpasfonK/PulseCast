@@ -29,8 +29,8 @@
   erreurs Kotlin).
 - APK = **artefact** du run (`pulsecast-debug-N`), téléchargeable ~14 jours
   depuis l'onglet Actions → run → Artifacts. Le numéro N du run correspond au
-  build. Dernier build vert de cette session : **run #7** (artefact
-  `pulsecast-debug-7` attendu) — voir git log pour le commit exact.
+  build. **Dernier build vert de cette session : artefact `pulsecast-debug-9`**
+  (run `34992357302`, commit `1b8deac`).
 
 ## 3. Ce qui est livré et fonctionne (confirmé par l'utilisateur)
 
@@ -164,6 +164,26 @@ app/src/main/java/com/pulsecast/app/
 
 ## 7. Pièges techniques identifiés (à ne pas redécouvrir)
 
+- **⚠ Un commit jamais buildé par CI n'est pas fiable, même « terminé »** :
+  ce round a découvert que le commit `eda1d34` (juste avant cette session)
+  avait été poussé sans jamais déclencher de run — il contenait deux erreurs
+  de compilation pures qui l'auraient fait échouer :
+  1. `PulseCastApp.kt` appelait `rememberCoroutineScope()` sans l'importer
+     (`import androidx.compose.runtime.rememberCoroutineScope`).
+  2. `RssParser.kt` avait une KDoc contenant littéralement `(image/*)` —
+     **les commentaires de bloc Kotlin sont imbriqués** (grammaire
+     `DelimitedComment: '/*' { DelimitedComment | <any character> } '*/'`) :
+     un `/*` à l'intérieur d'un commentaire déjà ouvert en ouvre un second,
+     qui doit lui aussi être refermé. Une seule paire `/`+`*` orpheline
+     (wildcard de type MIME, exemple de code, etc.) dans un commentaire fait
+     avaler tout le reste du fichier comme commentaire non fermé → erreurs
+     « Missing '}' » / « Unclosed comment » à des lignes qui semblent sans
+     rapport. **Règle** : ne jamais écrire `/*` ou `*/` en dehors d'un vrai
+     début/fin de commentaire, même dans du texte descriptif (préférer
+     `image/…`, ou séparer les caractères par une espace).
+  → Après chaque session, vérifier qu'un run CI a bien couvert le **dernier**
+  commit avant de le considérer acquis (comparer l'heure du commit à l'heure
+  du run, pas seulement regarder « le dernier run est vert »).
 - **CI seule** : toute erreur de compile coûte un run. Avant de push,
   relire : imports, nullabilité, noms de params Compose.
 - **Kotlin** : une fonction à bloc `{ }` n'a pas de return implicite (déjà
