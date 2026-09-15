@@ -4,22 +4,17 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pulsecast.app.PulseCastApplication
+import com.pulsecast.app.data.FeedRepository
 import com.pulsecast.app.data.catalog.CatalogPodcast
 import com.pulsecast.app.data.catalog.PodcastCatalogApi
 import com.pulsecast.app.data.local.entity.PodcastEntity
-import com.pulsecast.app.data.local.toEntity
-import com.pulsecast.app.data.parser.RssParser
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
 
 /** Une rangée thématique de la page d'accueil, chargée indépendamment. */
 data class DiscoverSection(
@@ -27,6 +22,12 @@ data class DiscoverSection(
     val podcasts: List<CatalogPodcast> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null
+)
+
+/** Abonnement exposé sur la page d'accueil, avec son compteur d'épisodes non lus. */
+data class SubscriptionItem(
+    val podcast: PodcastEntity,
+    val unplayedCount: Int
 )
 
 sealed interface CatalogSearchState {
@@ -38,7 +39,7 @@ sealed interface CatalogSearchState {
 
 /**
  * Alimente la page d'accueil : classement "À la une", rangées thématiques,
- * abonnements existants, recherche et abonnement en un tap.
+ * abonnements (avec compteurs de non-lus), recherche et abonnement en un tap.
  *
  * Chaque rangée se charge indépendamment : un thème qui échoue (réseau
  * capricieux) n'empêche pas les autres de s'afficher.
@@ -49,6 +50,7 @@ class DiscoverViewModel(application: Application) : AndroidViewModel(application
     private val podcastDao = database.podcastDao()
     private val episodeDao = database.episodeDao()
     private val catalog = PodcastCatalogApi()
+    private val feedRepository = FeedRepository(podcastDao, episodeDao)
 
     private val sectionThemes = listOf(
         "Actualités" to "actualité",
@@ -66,8 +68,22 @@ class DiscoverViewModel(application: Application) : AndroidViewModel(application
     private val _sections = MutableStateFlow(sectionThemes.map { DiscoverSection(title = it.first) })
     val sections: StateFlow<List<DiscoverSection>> = _sections.asStateFlow()
 
-    val subscriptions: StateFlow<List<PodcastEntity>> = podcastDao.observeAll()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /**
+     * Abonnements triés du plus récemment ajouté au plus ancien, chacun
+     * accompagné de son nombre d'épisodes non lus.
+     */
+    val subscriptionItems: StateFlow<List<SubscriptionItem>> = combine(
+        podcastDao.observeAll(),
+        episodeDao.observeUnplayedCounts()
+    ) { podcasts, counts ->
+        val countsByPodcast = counts.associate { it.podcastId to it.unplayedCount }
+        podcasts.map { podcast ->
+            SubscriptionItem(
+                podcast = podcast,
+                unplayedCount = countsByPodcast[podcast.id] ?: 0
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _subscribedIds = MutableStateFlow<Set<Long>>(emptySet())
     val subscribedIds: StateFlow<Set<Long>> = _subscribedIds.asStateFlow()
@@ -159,9 +175,10 @@ class DiscoverViewModel(application: Application) : AndroidViewModel(application
     }
 
     /**
-     * Abonne l'utilisateur : résout le flux RSS si nécessaire, le parse puis
-     * persiste le podcast et ses épisodes. Les messages d'état sont exposés
-     * via [subscribeMessage] pour être affichés dans la fiche du podcast.
+     * Abonne l'utilisateur : résout le flux RSS si nécessaire (les entrées du
+     * classement n'en fournissent pas), le télécharge puis persiste le podcast
+     * et tous ses épisodes. Les messages d'état sont exposés via
+     * [subscribeMessage] pour être affichés dans la fiche du podcast.
      */
     fun subscribe(podcast: CatalogPodcast) {
         viewModelScope.launch {
@@ -171,48 +188,27 @@ class DiscoverViewModel(application: Application) : AndroidViewModel(application
                 val feedUrl = podcast.feedUrl ?: catalog.resolveFeedUrl(podcast.id)
                     ?: error("Flux RSS introuvable pour ce podcast")
 
-                val alreadySubscribed = withContext(Dispatchers.IO) {
-                    podcastDao.findByFeedUrl(feedUrl)
-                }
-                if (alreadySubscribed != null) {
-                    _subscribedIds.value = _subscribedIds.value + podcast.id
-                    _subscribeMessage.value = "Tu es déjà abonné à ce podcast."
-                    return@launch
-                }
-
-                val parsedFeed = withContext(Dispatchers.IO) {
-                    openFeedStream(feedUrl).use { input -> RssParser().parse(input) }
-                }
-
-                withContext(Dispatchers.IO) {
-                    val podcastId = podcastDao.insert(
-                        PodcastEntity(
-                            feedUrl = feedUrl,
-                            title = parsedFeed.title.ifBlank { podcast.title },
-                            imageUrl = parsedFeed.imageUrl ?: podcast.artworkUrl,
-                            description = parsedFeed.description
-                        )
-                    )
-                    if (podcastId > 0) {
-                        episodeDao.insertAll(parsedFeed.episodes.map { it.toEntity(podcastId) })
-                    }
-                }
+                val result = feedRepository.fetchAndStoreFeed(
+                    feedUrl = feedUrl,
+                    fallbackTitle = podcast.title,
+                    fallbackImageUrl = podcast.artworkUrl
+                )
 
                 _subscribedIds.value = _subscribedIds.value + podcast.id
-                _subscribeMessage.value = "Abonné ! ${parsedFeed.episodes.size} épisodes importés."
+                _subscribeMessage.value = when {
+                    result.alreadySubscribed && result.newEpisodeCount == 0 ->
+                        "Déjà abonné : aucun nouvel épisode."
+                    result.alreadySubscribed ->
+                        "Flux actualisé : ${result.newEpisodeCount} nouvel(s) épisode(s)."
+                    else ->
+                        "Abonné ! ${result.newEpisodeCount} épisode(s) importé(s)."
+                }
             } catch (e: Exception) {
-                _subscribeMessage.value = "Échec de l'abonnement : ${e.message ?: "erreur inconnue"}"
+                _subscribeMessage.value =
+                    "Échec de l'abonnement : ${e.message ?: "erreur inconnue"}"
             } finally {
                 _subscribingIds.value = _subscribingIds.value - podcast.id
             }
         }
     }
-
-    private fun openFeedStream(feedUrl: String) =
-        (URL(feedUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 15_000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "PulseCast/1.0 (Android)")
-        }.inputStream
 }

@@ -4,24 +4,20 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pulsecast.app.PulseCastApplication
+import com.pulsecast.app.data.FeedRepository
 import com.pulsecast.app.data.local.entity.PodcastEntity
-import com.pulsecast.app.data.local.toEntity
 import com.pulsecast.app.data.parser.OpmlFeed
-import com.pulsecast.app.data.parser.RssParser
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
-import java.net.URL
 
 sealed interface ImportState {
     data object Idle : ImportState
     data object Loading : ImportState
+    data class Success(val message: String) : ImportState
     data class Error(val message: String) : ImportState
 }
 
@@ -30,6 +26,7 @@ data class OpmlImportProgress(
     val total: Int = 0,
     val completed: Int = 0,
     val currentTitle: String = "",
+    val importedEpisodes: Int = 0,
     val errors: List<String> = emptyList()
 )
 
@@ -37,6 +34,10 @@ data class OpmlImportProgress(
  * Bibliothèque : liste les podcasts abonnés et gère les deux modes d'ajout —
  * URL de flux RSS saisie à la main, ou import global d'un fichier OPML
  * (export Podcast Addict, AntennaPod, Pocket Casts…).
+ *
+ * Les deux chemins passent par [FeedRepository] : un podcast déjà présent
+ * mais sans épisodes voit son flux re-téléchargé au lieu d'être ignoré, ce
+ * qui répare les imports OPML incomplets.
  *
  * La découverte du catalogue et la recherche vivent dans `DiscoverViewModel`
  * (onglet Accueil).
@@ -46,6 +47,7 @@ class PodcastLibraryViewModel(application: Application) : AndroidViewModel(appli
     private val database = (application as PulseCastApplication).database
     private val podcastDao = database.podcastDao()
     private val episodeDao = database.episodeDao()
+    private val feedRepository = FeedRepository(podcastDao, episodeDao)
 
     val podcasts: StateFlow<List<PodcastEntity>> = podcastDao.observeAll()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -63,32 +65,16 @@ class PodcastLibraryViewModel(application: Application) : AndroidViewModel(appli
         viewModelScope.launch {
             _importState.value = ImportState.Loading
             try {
-                val alreadySubscribed = withContext(Dispatchers.IO) {
-                    podcastDao.findByFeedUrl(trimmedUrl)
-                }
-                if (alreadySubscribed != null) {
-                    _importState.value = ImportState.Error("Déjà abonné à ce podcast.")
-                    return@launch
-                }
-
-                val parsedFeed = withContext(Dispatchers.IO) {
-                    openFeedStream(trimmedUrl).use { input -> RssParser().parse(input) }
-                }
-
-                withContext(Dispatchers.IO) {
-                    val podcastId = podcastDao.insert(
-                        PodcastEntity(
-                            feedUrl = trimmedUrl,
-                            title = parsedFeed.title,
-                            imageUrl = parsedFeed.imageUrl,
-                            description = parsedFeed.description
-                        )
+                val result = feedRepository.fetchAndStoreFeed(trimmedUrl)
+                _importState.value = if (result.alreadySubscribed) {
+                    ImportState.Success(
+                        "Déjà abonné : flux actualisé (${result.newEpisodeCount} nouvel(s) épisode(s))."
                     )
-                    if (podcastId > 0) {
-                        episodeDao.insertAll(parsedFeed.episodes.map { it.toEntity(podcastId) })
-                    }
+                } else {
+                    ImportState.Success(
+                        "Abonné : ${result.newEpisodeCount} épisode(s) importé(s)."
+                    )
                 }
-                _importState.value = ImportState.Idle
             } catch (e: Exception) {
                 _importState.value = ImportState.Error(
                     "Impossible de charger ce flux : ${e.message ?: "erreur inconnue"}"
@@ -97,13 +83,16 @@ class PodcastLibraryViewModel(application: Application) : AndroidViewModel(appli
         }
     }
 
-    fun dismissError() {
+    fun dismissMessage() {
         _importState.value = ImportState.Idle
     }
 
     /**
-     * Importe une liste de flux issus d'un fichier OPML. Les flux déjà
-     * abonnés sont ignorés silencieusement ; les échecs unitaires sont
+     * Importe une liste de flux issus d'un fichier OPML.
+     *
+     * Les flux dont les épisodes sont déjà en base sont ignorés (réimport
+     * rapide), mais tout flux présent sans épisodes est re-téléchargé : c'est
+     * ce qui rattrape un import OPML interrompu. Les échecs unitaires sont
      * collectés sans interrompre le reste de l'import.
      */
     fun importOpmlFeeds(feeds: List<OpmlFeed>) {
@@ -114,47 +103,42 @@ class PodcastLibraryViewModel(application: Application) : AndroidViewModel(appli
             )
             return
         }
+        if (_opmlProgress.value.isActive) return
+
         viewModelScope.launch {
             _opmlProgress.value = OpmlImportProgress(isActive = true, total = feeds.size)
             val errors = mutableListOf<String>()
+            var importedEpisodes = 0
+
             for ((index, feed) in feeds.withIndex()) {
                 _opmlProgress.value = _opmlProgress.value.copy(
                     completed = index,
                     currentTitle = feed.title
                 )
                 try {
-                    val existing = withContext(Dispatchers.IO) {
-                        podcastDao.findByFeedUrl(feed.feedUrl)
-                    }
-                    if (existing == null) {
-                        withContext(Dispatchers.IO) {
-                            openFeedStream(feed.feedUrl).use { input ->
-                                val parsed = RssParser().parse(input)
-                                val title = parsed.title.ifBlank {
-                                    feed.title.ifBlank { "Podcast" }
-                                }
-                                val podcastId = podcastDao.insert(
-                                    PodcastEntity(
-                                        feedUrl = feed.feedUrl,
-                                        title = title,
-                                        imageUrl = parsed.imageUrl,
-                                        description = parsed.description
-                                    )
-                                )
-                                if (podcastId > 0) {
-                                    episodeDao.insertAll(parsed.episodes.map { it.toEntity(podcastId) })
-                                }
-                            }
-                        }
+                    val existing = podcastDao.findByFeedUrl(feed.feedUrl)
+                    val alreadyComplete = existing != null &&
+                        episodeDao.countForPodcast(existing.id) > 0
+                    if (alreadyComplete) continue
+
+                    val result = feedRepository.fetchAndStoreFeed(
+                        feedUrl = feed.feedUrl,
+                        fallbackTitle = feed.title
+                    )
+                    importedEpisodes += result.newEpisodeCount
+                    if (result.episodeCount == 0) {
+                        errors += "${feed.title} : aucun épisode dans le flux"
                     }
                 } catch (e: Exception) {
                     errors += "${feed.title} : ${e.message ?: "erreur inconnue"}"
                 }
             }
+
             _opmlProgress.value = OpmlImportProgress(
                 isActive = false,
                 total = feeds.size,
                 completed = feeds.size,
+                importedEpisodes = importedEpisodes,
                 errors = errors
             )
         }
@@ -163,12 +147,4 @@ class PodcastLibraryViewModel(application: Application) : AndroidViewModel(appli
     fun dismissOpmlProgress() {
         _opmlProgress.value = OpmlImportProgress()
     }
-
-    private fun openFeedStream(feedUrl: String) =
-        (URL(feedUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 15_000
-            instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "PulseCast/1.0 (Android)")
-        }.inputStream
 }

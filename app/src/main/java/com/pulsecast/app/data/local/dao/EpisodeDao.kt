@@ -14,6 +14,24 @@ interface EpisodeDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertAll(episodes: List<EpisodeEntity>): List<Long>
 
+    /** Nombre total d'épisodes stockés pour un podcast (0 = flux jamais récupéré). */
+    @Query("SELECT COUNT(*) FROM episodes WHERE podcast_id = :podcastId")
+    suspend fun countForPodcast(podcastId: Long): Int
+
+    /**
+     * Nombre d'épisodes non lus, regroupé par podcast — alimente les
+     * compteurs d'abonnements de la page d'accueil.
+     */
+    @Query(
+        """
+        SELECT podcast_id AS podcastId, COUNT(*) AS unplayedCount
+        FROM episodes
+        WHERE is_played = 0
+        GROUP BY podcast_id
+        """
+    )
+    fun observeUnplayedCounts(): Flow<List<PodcastUnplayedCount>>
+
     @Update
     suspend fun update(episode: EpisodeEntity)
 

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Palette
@@ -50,9 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.pulsecast.app.data.catalog.CatalogPodcast
-import com.pulsecast.app.data.local.entity.PodcastEntity
 import com.pulsecast.app.ui.components.PodcastArtworkCard
-import com.pulsecast.app.ui.components.PodcastCircleCard
 import com.pulsecast.app.ui.components.PulseCastSurface
 
 /**
@@ -75,13 +75,15 @@ fun HomeScreen(
 
     val featured by viewModel.featured.collectAsState()
     val sections by viewModel.sections.collectAsState()
-    val subscriptions by viewModel.subscriptions.collectAsState()
+    val subscriptionItems by viewModel.subscriptionItems.collectAsState()
     val subscribedIds by viewModel.subscribedIds.collectAsState()
     val subscribingIds by viewModel.subscribingIds.collectAsState()
     val subscribeMessage by viewModel.subscribeMessage.collectAsState()
     val searchState by viewModel.searchState.collectAsState()
 
-    val subscribedFeedUrls = remember(subscriptions) { subscriptions.map { it.feedUrl }.toSet() }
+    val subscribedFeedUrls = remember(subscriptionItems) {
+        subscriptionItems.map { it.podcast.feedUrl }.toSet()
+    }
 
     var query by rememberSaveable { mutableStateOf("") }
     var isSearching by rememberSaveable { mutableStateOf(false) }
@@ -134,7 +136,7 @@ fun HomeScreen(
                 DiscoveryFeed(
                     featured = featured,
                     sections = sections,
-                    subscriptions = subscriptions,
+                    subscriptionItems = subscriptionItems,
                     onOpenEpisodes = onOpenEpisodes,
                     onOpenLibrary = onOpenLibrary,
                     onRetry = viewModel::refresh,
@@ -233,7 +235,7 @@ private fun SearchEntry(onClick: () -> Unit) {
 private fun DiscoveryFeed(
     featured: DiscoverSection,
     sections: List<DiscoverSection>,
-    subscriptions: List<PodcastEntity>,
+    subscriptionItems: List<SubscriptionItem>,
     onOpenEpisodes: (Long) -> Unit,
     onOpenLibrary: () -> Unit,
     onRetry: () -> Unit,
@@ -244,24 +246,13 @@ private fun DiscoveryFeed(
         contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(22.dp)
     ) {
-        if (subscriptions.isNotEmpty()) {
+        if (subscriptionItems.isNotEmpty()) {
             item(key = "subscriptions") {
-                Column {
-                    SectionTitle("Mes abonnements")
-                    Spacer(Modifier.height(10.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp)
-                    ) {
-                        items(subscriptions, key = { it.id }) { podcast ->
-                            PodcastCircleCard(
-                                title = podcast.title,
-                                artworkUrl = podcast.imageUrl,
-                                onClick = { onOpenEpisodes(podcast.id) }
-                            )
-                        }
-                    }
-                }
+                SubscriptionsSection(
+                    items = subscriptionItems,
+                    onOpenEpisodes = onOpenEpisodes,
+                    onOpenLibrary = onOpenLibrary
+                )
             }
         } else {
             item(key = "subscriptions_empty") {
@@ -369,6 +360,104 @@ private fun ErrorRow(message: String, onRetry: () -> Unit) {
             modifier = Modifier.weight(1f)
         )
         TextButton(onClick = onRetry) { Text("Réessayer") }
+    }
+}
+
+@Composable
+private fun SubscriptionsSection(
+    items: List<SubscriptionItem>,
+    onOpenEpisodes: (Long) -> Unit,
+    onOpenLibrary: () -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Mes abonnements",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
+                Text(
+                    text = "${items.size} podcast(s)",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            TextButton(onClick = onOpenLibrary) { Text("Tout voir") }
+        }
+        Spacer(Modifier.height(8.dp))
+
+        // Grille construite à la main (rangées de 3) plutôt qu'un
+        // LazyVerticalGrid imbriqué : un défilement vertical dans un
+        // défilement vertical est interdit par Compose.
+        items.chunked(3).forEach { rowItems ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                rowItems.forEach { item ->
+                    SubscriptionGridCard(
+                        item = item,
+                        onClick = { onOpenEpisodes(item.podcast.id) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                repeat(3 - rowItems.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionGridCard(
+    item: SubscriptionItem,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.clickable(onClick = onClick)) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            AsyncImage(
+                model = item.podcast.imageUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f)
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentScale = ContentScale.Crop
+            )
+            if (item.unplayedCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(6.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "${item.unplayedCount}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = item.podcast.title,
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 

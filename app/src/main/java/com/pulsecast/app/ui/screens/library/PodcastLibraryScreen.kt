@@ -124,13 +124,24 @@ fun PodcastLibraryScreen(
             }
 
             val currentImportState = importState
-            if (currentImportState is ImportState.Error) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = currentImportState.message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall
-                )
+            when (currentImportState) {
+                is ImportState.Error -> {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = currentImportState.message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                is ImportState.Success -> {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = currentImportState.message,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                else -> Unit
             }
 
             Spacer(Modifier.height(10.dp))
@@ -219,6 +230,14 @@ private fun OpmlProgressCard(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1
+                )
+            }
+            if (!progress.isActive && progress.importedEpisodes > 0) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "${progress.importedEpisodes} épisode(s) importé(s).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
                 )
             }
             if (progress.errors.isNotEmpty()) {
