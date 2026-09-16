@@ -1,7 +1,6 @@
 package com.pulsecast.app.ui.screens.episodes
 
 import android.app.Application
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,16 +12,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -40,28 +34,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.AsyncImage
 import com.pulsecast.app.data.local.entity.EpisodeEntity
 import com.pulsecast.app.ui.components.KeywordFilterDialog
 import com.pulsecast.app.ui.components.PulseCastSurface
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-private val episodeDateFormat = SimpleDateFormat("d MMM yyyy", Locale.FRENCH)
+private val MAX_CONTENT_WIDTH = 640.dp
 
 /**
- * Liste des épisodes d'un podcast : pochette et compteurs en en-tête, onglets
- * Non-lus/Lus, filtrage par mot-clé et actualisation du flux RSS. Si le flux
- * n'a jamais été téléchargé (import incomplet), l'écran propose — et tente
- * automatiquement — une récupération des épisodes.
+ * Liste des épisodes d'un podcast, avec onglets Non-lus/Lus et un dialogue
+ * de filtrage par mot-clé (bouton en haut à droite).
  */
 @Composable
 fun EpisodeListScreen(
@@ -80,19 +64,19 @@ fun EpisodeListScreen(
     val podcast by viewModel.podcast.collectAsState()
     val unplayed by viewModel.unplayedEpisodes.collectAsState()
     val played by viewModel.playedEpisodes.collectAsState()
-    val isRefreshing by viewModel.isRefreshing.collectAsState()
-    val refreshMessage by viewModel.refreshMessage.collectAsState()
 
     var selectedTabIndex by rememberSaveable { mutableStateOf(0) }
     var showFilterDialog by rememberSaveable { mutableStateOf(false) }
 
-    Column(modifier = modifier.fillMaxSize()) {
+    Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .widthIn(max = MAX_CONTENT_WIDTH)
+    ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(onClick = onBack) {
                 Icon(
@@ -101,36 +85,13 @@ fun EpisodeListScreen(
                     tint = MaterialTheme.colorScheme.onBackground
                 )
             }
-            AsyncImage(
-                model = podcast?.imageUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentScale = ContentScale.Crop
+            Text(
+                text = podcast?.title.orEmpty(),
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                modifier = Modifier.weight(1f).padding(horizontal = 4.dp)
             )
-            Column(modifier = Modifier.weight(1f).padding(horizontal = 4.dp)) {
-                Text(
-                    text = podcast?.title.orEmpty(),
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${unplayed.size} non-lu(s) · ${played.size} lu(s)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            IconButton(onClick = viewModel::refresh, enabled = !isRefreshing) {
-                Icon(
-                    imageVector = Icons.Filled.Refresh,
-                    contentDescription = "Actualiser le flux",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
             TextButton(onClick = { showFilterDialog = true }) {
                 Text("Filtre")
             }
@@ -149,82 +110,30 @@ fun EpisodeListScreen(
             )
         }
 
-        if (isRefreshing) {
-            LinearProgressIndicator(
-                modifier = Modifier.fillMaxWidth().height(3.dp)
-            )
-        }
-
-        refreshMessage?.let { message ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 4.dp, top = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(onClick = viewModel::dismissRefreshMessage) {
-                    Text("OK")
-                }
-            }
-        }
-
         val episodesToShow = if (selectedTabIndex == 0) unplayed else played
 
         if (episodesToShow.isEmpty()) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 32.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
-                    text = if (selectedTabIndex == 0) {
-                        "Aucun épisode non-lu pour l'instant."
-                    } else {
-                        "Aucun épisode lu pour l'instant."
-                    },
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = if (selectedTabIndex == 0) "Aucun épisode non-lu." else "Aucun épisode lu pour l'instant.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
+                    style = MaterialTheme.typography.bodyMedium
                 )
-                if (unplayed.isEmpty() && played.isEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = "Le flux n'a peut-être pas encore été téléchargé. " +
-                            "Tente une actualisation pour récupérer les épisodes.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Button(onClick = viewModel::refresh, enabled = !isRefreshing) {
-                        Text("Actualiser le flux")
-                    }
-                }
             }
         } else {
             LazyColumn(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(episodesToShow, key = { it.id }) { episode ->
                     EpisodeRow(
                         episode = episode,
-                        onClick = { onPlayEpisode(episode, podcast?.title, podcast?.imageUrl) },
-                        onTogglePlayed = { viewModel.togglePlayed(episode) }
+                        onClick = { onPlayEpisode(episode, podcast?.title, podcast?.imageUrl) }
                     )
                 }
             }
         }
+    }
     }
 
     if (showFilterDialog) {
@@ -240,103 +149,47 @@ fun EpisodeListScreen(
 }
 
 @Composable
-private fun EpisodeRow(
-    episode: EpisodeEntity,
-    onClick: () -> Unit,
-    onTogglePlayed: () -> Unit
-) {
+private fun EpisodeRow(episode: EpisodeEntity, onClick: () -> Unit) {
     PulseCastSurface(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.PlayArrow,
-                    contentDescription = "Lire",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.padding(12.dp).fillMaxWidth()) {
+            Text(
+                text = episode.title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = episode.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    text = formatDuration(episode.durationMs),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                val meta = episodeMeta(episode)
-                if (meta.isNotEmpty()) {
-                    Spacer(Modifier.height(4.dp))
+                if (episode.isFavorite) {
                     Text(
-                        text = meta,
+                        text = "\u2605",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-                if (episode.playbackPositionMs > 0 && episode.durationMs > 0) {
-                    Spacer(Modifier.height(6.dp))
-                    val fraction =
-                        (episode.playbackPositionMs.toFloat() / episode.durationMs.toFloat())
-                            .coerceIn(0f, 1f)
-                    LinearProgressIndicator(
-                        progress = { fraction },
-                        modifier = Modifier.fillMaxWidth().height(3.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
-
-            IconButton(onClick = onTogglePlayed) {
-                Icon(
-                    imageVector = if (episode.isPlayed) {
-                        Icons.Filled.Refresh
-                    } else {
-                        Icons.Filled.Check
-                    },
-                    contentDescription = if (episode.isPlayed) {
-                        "Marquer comme non lu"
-                    } else {
-                        "Marquer comme lu"
-                    },
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
+            if (episode.playbackPositionMs > 0 && episode.durationMs > 0) {
+                Spacer(Modifier.height(6.dp))
+                val fraction = (episode.playbackPositionMs.toFloat() / episode.durationMs.toFloat())
+                    .coerceIn(0f, 1f)
+                LinearProgressIndicator(
+                    progress = fraction,
+                    modifier = Modifier.fillMaxWidth().height(3.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
                 )
             }
         }
     }
 }
 
-private fun episodeMeta(episode: EpisodeEntity): String {
-    val parts = mutableListOf<String>()
-    if (episode.pubDate > 0L) {
-        parts += episodeDateFormat.format(Date(episode.pubDate))
-    }
-    if (episode.durationMs > 0L) {
-        parts += formatDuration(episode.durationMs)
-    }
-    if (episode.isFavorite) {
-        parts += "\u2605"
-    }
-    return parts.joinToString(" · ")
-}
-
 private fun formatDuration(durationMs: Long): String {
-    if (durationMs <= 0L) return "Durée inconnue"
+    if (durationMs <= 0) return "Durée inconnue"
     val totalSeconds = durationMs / 1000
     val hours = totalSeconds / 3600
     val minutes = (totalSeconds % 3600) / 60
