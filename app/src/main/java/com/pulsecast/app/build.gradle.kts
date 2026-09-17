@@ -69,15 +69,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    // material-icons-core ne couvre qu'un sous-ensemble restreint d'icônes
-    // (Pause et Palette, par exemple, n'en font pas partie alors que
-    // PlayArrow ou Check si — une distinction non documentée qui a fait
-    // échouer le build #10). material-icons-extended couvre tout le
-    // catalogue Material au prix d'une bibliothèque plus lourde (~2000
-    // icônes) ; comme isMinifyEnabled est encore à false, R8 ne retire pas
-    // les icônes inutilisées pour l'instant — acceptable en développement,
-    // à revisiter si la taille de l'APK release devient un sujet.
     implementation("androidx.compose.material:material-icons-core")
+    // Nécessaire pour Icons.Filled.Pause (absent de icons-core)
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.navigation:navigation-compose:2.8.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
