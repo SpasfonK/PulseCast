@@ -1,18 +1,22 @@
 package com.pulsecast.app.ui.screens.library
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.pulsecast.app.PulseCastApplication
 import com.pulsecast.app.data.FeedRepository
 import com.pulsecast.app.data.local.entity.PodcastEntity
+import com.pulsecast.app.data.parser.OpmlExporter
 import com.pulsecast.app.data.parser.OpmlFeed
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed interface ImportState {
     data object Idle : ImportState
@@ -85,6 +89,48 @@ class PodcastLibraryViewModel(application: Application) : AndroidViewModel(appli
 
     fun dismissMessage() {
         _importState.value = ImportState.Idle
+    }
+
+    private val _exportState = MutableStateFlow<ImportState>(ImportState.Idle)
+    val exportState: StateFlow<ImportState> = _exportState.asStateFlow()
+
+    /**
+     * Exporte tous les podcasts abonnés vers le fichier OPML désigné par
+     * [uri] (obtenu via `ActivityResultContracts.CreateDocument` côté UI —
+     * l'utilisateur choisit l'emplacement, aucune permission de stockage
+     * n'est nécessaire). Le fichier produit est directement ré-importable
+     * par [importOpmlFeeds] ou par une autre application de podcasts.
+     */
+    fun exportOpml(uri: Uri) {
+        viewModelScope.launch {
+            _exportState.value = ImportState.Loading
+            try {
+                val currentPodcasts = podcasts.value
+                if (currentPodcasts.isEmpty()) {
+                    _exportState.value = ImportState.Error("Aucun podcast à exporter.")
+                    return@launch
+                }
+
+                val opmlContent = OpmlExporter.export(currentPodcasts)
+                withContext(Dispatchers.IO) {
+                    val output = getApplication<Application>().contentResolver.openOutputStream(uri)
+                        ?: error("Impossible d'ouvrir l'emplacement choisi.")
+                    output.use { it.write(opmlContent.toByteArray(Charsets.UTF_8)) }
+                }
+
+                _exportState.value = ImportState.Success(
+                    "${currentPodcasts.size} podcast(s) exporté(s)."
+                )
+            } catch (e: Exception) {
+                _exportState.value = ImportState.Error(
+                    "Échec de l'export : ${e.message ?: "erreur inconnue"}"
+                )
+            }
+        }
+    }
+
+    fun dismissExportMessage() {
+        _exportState.value = ImportState.Idle
     }
 
     /**

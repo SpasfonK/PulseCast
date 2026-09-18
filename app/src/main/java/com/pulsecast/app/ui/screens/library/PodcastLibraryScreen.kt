@@ -62,6 +62,7 @@ fun PodcastLibraryScreen(
     val podcasts by viewModel.podcasts.collectAsState()
     val importState by viewModel.importState.collectAsState()
     val opmlProgress by viewModel.opmlProgress.collectAsState()
+    val exportState by viewModel.exportState.collectAsState()
 
     var feedUrlInput by rememberSaveable { mutableStateOf("") }
     val context = LocalContext.current
@@ -74,6 +75,12 @@ fun PodcastLibraryScreen(
                 viewModel.importOpmlFeeds(OpmlParser().parse(stream))
             }
         }
+    }
+
+    val opmlExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/x-opml")
+    ) { uri ->
+        uri?.let { viewModel.exportOpml(it) }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -150,6 +157,43 @@ fun PodcastLibraryScreen(
                 enabled = !opmlProgress.isActive
             ) {
                 Text("Importer OPML (Podcast Addict…)")
+            }
+
+            Spacer(Modifier.height(8.dp))
+            FilledTonalButton(
+                onClick = { opmlExportLauncher.launch("pulsecast-abonnements.opml") },
+                enabled = podcasts.isNotEmpty() && exportState !is ImportState.Loading
+            ) {
+                if (exportState is ImportState.Loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                } else {
+                    Text("Exporter OPML (${podcasts.size})")
+                }
+            }
+
+            val currentExportState = exportState
+            when (currentExportState) {
+                is ImportState.Error -> {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = currentExportState.message,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                is ImportState.Success -> {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = currentExportState.message,
+                        color = MaterialTheme.colorScheme.primary,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                else -> Unit
             }
 
             if (opmlProgress.isActive || opmlProgress.errors.isNotEmpty()) {
