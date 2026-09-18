@@ -30,6 +30,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
@@ -102,6 +104,17 @@ fun PulseCastApp() {
                 } else {
                     0.dp
                 },
+                // Par défaut, BottomSheetScaffold plafonne la feuille à 640dp
+                // (BottomSheetDefaults.SheetMaxWidth) et lui donne des coins
+                // arrondis même en position Expanded — pensé pour éviter
+                // qu'une feuille s'étire sur tablette, mais ça transforme le
+                // grand lecteur en petite carte flottante avec le reste de
+                // l'écran visible autour dès que l'écran dépasse 640dp de
+                // large (Honor Magic V2 déplié : ~900dp). Dp.Unspecified fait
+                // que la feuille occupe toute la largeur disponible, quelle
+                // que soit la taille de l'écran.
+                sheetMaxWidth = Dp.Unspecified,
+                sheetShape = RectangleShape,
                 sheetDragHandle = {},
                 sheetContent = {
                     if (hasActiveEpisode) {
