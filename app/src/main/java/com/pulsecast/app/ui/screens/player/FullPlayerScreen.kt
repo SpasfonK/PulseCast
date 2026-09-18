@@ -4,6 +4,8 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -116,6 +118,7 @@ fun FullPlayerScreen(
                             .fillMaxWidth()
                             .height(hingeTopDp)
                             .windowInsetsPadding(WindowInsets.statusBars)
+                            .verticalScroll(rememberScrollState())
                             .padding(horizontal = 24.dp)
                     )
                     Spacer(modifier = Modifier.fillMaxWidth().height(hingeGapDp))
@@ -128,6 +131,7 @@ fun FullPlayerScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
                             .padding(horizontal = 24.dp)
                             .windowInsetsPadding(WindowInsets.navigationBars)
                     )
@@ -140,7 +144,20 @@ fun FullPlayerScreen(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .windowInsetsPadding(WindowInsets.statusBars),
+                            .windowInsetsPadding(WindowInsets.statusBars)
+                            // Filet de sécurité : sur un écran proche du carré
+                            // (Magic V2 déplié), l'illustration en pleine
+                            // largeur peut à elle seule approcher la hauteur
+                            // disponible, ce qui poussait scrubber/sauts/
+                            // lecture-pause/vitesse hors champ, sans aucun
+                            // moyen de les atteindre. Le défilement garantit
+                            // que les contrôles restent accessibles quelle
+                            // que soit la proportion de l'écran ; tant que le
+                            // contenu tient dans l'espace disponible,
+                            // Arrangement.Center continue de le centrer
+                            // normalement (aucun changement visuel sur un
+                            // téléphone classique).
+                            .verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center
                     ) {
